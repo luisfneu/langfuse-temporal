@@ -1,0 +1,4 @@
+temporalio>=1.34.0,<2
+anthropic>=1.11.0,<2
+langfuse>=4.16.0,<5
+python-dotenv>=1.0.0,<2
