@@ -114,7 +114,8 @@ cd infra/langfuse && docker compose logs -f langfuse-web
 ## Pontos de atenção
 
 - `thinking` desabilitado nas chamadas ao Claude (`thinking={"type": "disabled"}`) — simplifica o round-trip pelo Temporal (sem blocos de thinking pra serializar). Pra habilitar, ver `shared/model-migration.md` do skill `claude-api` — Opus 5 pensa por padrão e isso soma no `max_tokens`.
-- Modelo fixo em `claude-opus-5` (`agent/activities.py`) — trocar pra `claude-sonnet-5` ali se quiser iterar mais barato.
+- Modelo fixo em `claude-haiku-4-5` (`agent/activities.py`) — trocar ali se quiser mais qualidade (`claude-opus-5`) ou meio-termo (`claude-sonnet-5`).
 - Portas: Temporal Postgres em `5433` (não `5432`) pra não colidir com o Postgres do Langfuse.
 - `infra/langfuse/.env` e `agent/.env` têm segredos — já no `.gitignore`, nunca commitar.
 - `LANGFUSE_INIT_ORG_ID` precisa estar setado pro bootstrap automático rodar (sem ele, o Langfuse ignora todas as outras variáveis `LANGFUSE_INIT_*` silenciosamente, só avisa no log).
+- **Langfuse v4 (self-host) mudou o schema do ClickHouse.** As tabelas antigas `traces`/`observations`/`analytics_traces`/`analytics_observations` ficam vazias mesmo com tudo funcionando — o dado real cai em `events_core`/`events_full`. Pra conferir via SQL direto, use essas; pra conferir via API, use `/api/public/v2/observations` (o mesmo "read path" que a UI usa), não o `/api/public/traces` antigo (que retorna 400 em modo `events_only`).

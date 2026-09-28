@@ -9,7 +9,7 @@ from temporalio import activity
 
 from tools import TOOL_DEFINITIONS, execute_tool_call
 
-MODEL = "claude-opus-5"
+MODEL = "claude-haiku-4-5"
 SYSTEM_PROMPT = (
     "Você é um agente de teste de infraestrutura. Use as tools disponíveis "
     "(get_weather, calculate) quando a pergunta precisar delas. Responda em "
