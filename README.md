@@ -26,6 +26,8 @@ agent-poc/
     workflows.py    AgentWorkflow (loop determinístico)
     worker.py       worker Temporal (registra workflow+activities)
     trigger.py      CLI pra disparar uma execução
+    web.py          Flask — interface web (chat)
+    templates/      index.html do chat
     .env            segredos locais (gitignored) — Langfuse já preenchido, falta ANTHROPIC_API_KEY
 ```
 
@@ -91,7 +93,17 @@ cd agent && ./.venv/bin/python trigger.py "Qual o clima em Lisboa e quanto é (1
 
 Sem argumento usa uma pergunta padrão que força as duas tools dummy.
 
-## 5. Verificar
+## 5. Interface web (opcional)
+
+Chat simples pra conversar com o agent sem usar a CLI. Precisa do worker rodando (passo 4).
+
+```bash
+cd agent && ./.venv/bin/python web.py
+```
+
+Abre `http://localhost:8090`. Cada pergunta dispara um workflow novo (sem memória entre perguntas — mesma limitação do `trigger.py`).
+
+## 6. Verificar
 
 - **Temporal UI** (`localhost:8080`): workflow `agent-poc-...` aparece com histórico completo — cada Activity (`call_claude`, `execute_tool`) com input/output/retries.
 - **Langfuse UI** (`localhost:3000`, projeto `agent-poc`): trace com cada generation (`agent-turn`, modelo, tokens) e cada tool call (`get_weather`/`calculate`), tempo e custo.

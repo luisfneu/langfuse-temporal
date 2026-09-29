@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-poc</title>
+<style>
+  :root {
+    --bg: #f5f6fa;
+    --surface: #ffffff;
+    --border: #d7dbe3;
+    --text: #1b1f27;
+    --text-muted: #5b6472;
+    --accent: #4c5fd5;
+    --accent-ink: #ffffff;
+    --error: #b4232f;
+    --error-bg: #fbe9ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11151c;
+      --surface: #171c26;
+      --border: #2b3240;
+      --text: #e7eaf0;
+      --text-muted: #9aa3b2;
+      --accent: #8b97f0;
+      --accent-ink: #11151c;
+      --error: #e08a94;
+      --error-bg: #3a1e22;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
+  header h1 { font-size: 1rem; margin: 0; font-weight: 650; }
+  header span {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .msg {
+    max-width: 70ch;
+    padding: 0.6rem 0.9rem;
+    border-radius: 10px;
+    line-height: 1.45;
+    font-size: 0.94rem;
+    white-space: pre-wrap;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .msg.agent {
+    align-self: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  .msg.error {
+    align-self: flex-start;
+    background: var(--error-bg);
+    color: var(--error);
+    border: 1px solid var(--error);
+  }
+  .msg.pending {
+    align-self: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-style: italic;
+  }
+  form {
+    display: flex;
+    gap: 0.6rem;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--border);
+  }
+  input {
+    flex: 1;
+    padding: 0.65rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    padding: 0.65rem 1.1rem;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.55; cursor: default; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>agent-poc</h1>
+    <span>claude-haiku-4-5 · temporal · langfuse</span>
+  </header>
+
+  <div id="log"></div>
+
+  <form id="form">
+    <input id="question" type="text" placeholder="pergunta pro agent..." autocomplete="off" autofocus>
+    <button id="send" type="submit">Enviar</button>
+  </form>
+
+  <script>
+    const log = document.getElementById("log");
+    const form = document.getElementById("form");
+    const input = document.getElementById("question");
+    const button = document.getElementById("send");
+
+    function addMessage(text, cls) {
+      const el = document.createElement("div");
+      el.className = "msg " + cls;
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
+    }
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const question = input.value.trim();
+      if (!question) return;
+
+      addMessage(question, "user");
+      input.value = "";
+      input.disabled = true;
+      button.disabled = true;
+      const pending = addMessage("pensando...", "pending");
+
+      try {
+        const resp = await fetch("/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question }),
+        });
+        const data = await resp.json();
+        pending.remove();
+        if (!resp.ok) {
+          addMessage(data.error || "erro desconhecido", "error");
+        } else {
+          addMessage(data.answer, "agent");
+        }
+      } catch (err) {
+        pending.remove();
+        addMessage("falha de rede: " + err.message, "error");
+      } finally {
+        input.disabled = false;
+        button.disabled = false;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>
