@@ -1,5 +1,6 @@
 """Workflow determinístico: orquestra as activities, nunca chama Claude/rede direto."""
 
+from dataclasses import dataclass
 from datetime import timedelta
 
 from temporalio import workflow
@@ -19,16 +20,22 @@ MAX_TURNS = 8
 RETRY_POLICY = RetryPolicy(maximum_attempts=3)
 
 
+@dataclass
+class AgentRequest:
+    user_message: str
+    session_id: str
+
+
 @workflow.defn
 class AgentWorkflow:
     @workflow.run
-    async def run(self, user_message: str) -> str:
-        messages: list[dict] = [{"role": "user", "content": user_message}]
+    async def run(self, request: AgentRequest) -> str:
+        messages: list[dict] = [{"role": "user", "content": request.user_message}]
 
         for _ in range(MAX_TURNS):
             turn = await workflow.execute_activity(
                 call_claude,
-                ClaudeTurnInput(messages=messages),
+                ClaudeTurnInput(messages=messages, session_id=request.session_id),
                 start_to_close_timeout=timedelta(seconds=60),
                 retry_policy=RETRY_POLICY,
             )
@@ -50,6 +57,7 @@ class AgentWorkflow:
                         name=block["name"],
                         tool_input=block["input"],
                         tool_use_id=block["id"],
+                        session_id=request.session_id,
                     ),
                     start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=RETRY_POLICY,

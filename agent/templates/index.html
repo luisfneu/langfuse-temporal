@@ -124,6 +124,7 @@
   <header>
     <h1>agent-poc</h1>
     <span>claude-haiku-4-5 · temporal · langfuse</span>
+    <span id="session-badge" style="margin-left: auto;"></span>
   </header>
 
   <div id="log"></div>
@@ -138,6 +139,10 @@
     const form = document.getElementById("form");
     const input = document.getElementById("question");
     const button = document.getElementById("send");
+
+    // uma session por carregamento de página — agrupa as perguntas no Langfuse
+    const sessionId = "web-" + crypto.randomUUID();
+    document.getElementById("session-badge").textContent = "session: " + sessionId;
 
     function addMessage(text, cls) {
       const el = document.createElement("div");
@@ -163,7 +168,7 @@
         const resp = await fetch("/ask", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question }),
+          body: JSON.stringify({ question, session_id: sessionId }),
         });
         const data = await resp.json();
         pending.remove();
