@@ -1,16 +1,21 @@
 # agent-poc
 
-POC de AI agent com **Temporal** (orquestração do loop de tool-use) + **Langfuse** (observabilidade/tracing) + **Claude API** (Opus 5).
+POC de AI agent com **Temporal** (orquestração + memória de sessão) + **Langfuse** (observabilidade/tracing) + **Claude API** (Haiku 4.5).
 
 ## Arquitetura
 
 ```
-trigger.py --> Temporal Workflow (AgentWorkflow) --> Activities
-                                                        ├─ call_claude   (chama Claude, loga generation no Langfuse)
-                                                        └─ execute_tool  (tools dummy: get_weather, calculate)
+trigger.py / web.py --> Update "ask" (com start) --> Workflow AgentWorkflow (1 por sessão, long-running)
+                                                         │
+                                                         ├─ acumula self.messages (memória da conversa)
+                                                         └─ Activities por pergunta:
+                                                              ├─ call_claude   (chama Claude, loga generation no Langfuse)
+                                                              └─ execute_tool  (tools dummy: get_weather, calculate)
 ```
 
-O workflow roda o loop `while stop_reason == "tool_use"`. Cada chamada ao Claude e cada execução de tool é uma Activity (Temporal dá retry automático). Cada Activity abre um span/generation no Langfuse — a trace completa (cada turno do Claude + cada tool call, com tokens) aparece na UI do Langfuse.
+**1 sessão = 1 workflow long-running**, não 1 workflow por pergunta. `workflow_id` é o `session_id`. Cliente manda pergunta via `execute_update_with_start_workflow` (RPC síncrono: se o workflow já existe, entra nele; se não, cria) — nunca com `start_workflow` direto. O workflow fica `Running` esperando a próxima pergunta; depois de `MAX_TURNS_PER_RUN` perguntas ele dá `continue_as_new` (reseta o event history do Temporal, carrega `self.messages` adiante, `workflow_id` não muda).
+
+Cada pergunta roda o loop `while stop_reason == "tool_use"` como Activity (retry automático do Temporal). Cada Activity abre um span/generation no Langfuse marcado com `session_id` = `workflow_id` — todas as perguntas da mesma sessão aparecem agrupadas em **Sessions** na UI do Langfuse.
 
 ## Estrutura
 
@@ -23,9 +28,9 @@ agent-poc/
     requirements.txt
     tools.py        tools dummy (get_weather, calculate)
     activities.py   call_claude, execute_tool (Temporal activities)
-    workflows.py    AgentWorkflow (loop determinístico)
+    workflows.py    AgentWorkflow — long-running, 1 por sessão, update "ask"
     worker.py       worker Temporal (registra workflow+activities)
-    trigger.py      CLI pra disparar uma execução
+    trigger.py      CLI pra conversar com o agent (mantém sessão via env var)
     web.py          Flask — interface web (chat)
     templates/      index.html do chat
     .env            segredos locais (gitignored) — Langfuse já preenchido, falta ANTHROPIC_API_KEY
@@ -85,28 +90,33 @@ Terminal 1 — worker (fica escutando, deixa rodando):
 cd agent && ./.venv/bin/python worker.py
 ```
 
-Terminal 2 — dispara uma execução:
+Terminal 2 — conversa com o agent:
 
 ```bash
 cd agent && ./.venv/bin/python trigger.py "Qual o clima em Lisboa e quanto é (12 + 8) * 3?"
 ```
 
-Sem argumento usa uma pergunta padrão que força as duas tools dummy.
+Sem argumento usa uma pergunta padrão. Cada chamada sem `AGENT_SESSION_ID` setado cria uma sessão nova (sem memória da anterior). Pra continuar a mesma conversa:
+
+```bash
+export AGENT_SESSION_ID=cli-xxxx   # o trigger.py imprime esse valor no final de cada resposta
+./.venv/bin/python trigger.py "e meu nome, lembra?"
+```
 
 ## 5. Interface web (opcional)
 
-Chat simples pra conversar com o agent sem usar a CLI. Precisa do worker rodando (passo 4).
+Chat com memória de conversa, sem usar a CLI. Precisa do worker rodando (passo 4).
 
 ```bash
 cd agent && ./.venv/bin/python web.py
 ```
 
-Abre `http://localhost:8090`. Cada pergunta dispara um workflow novo (sem memória entre perguntas — mesma limitação do `trigger.py`).
+Abre `http://localhost:8090`. Um `session_id` é gerado ao carregar a página (mostrado no canto do header) e reaproveitado em toda pergunta daquela aba — o agent lembra o que foi dito antes, dentro da mesma aba. Recarregar a página começa sessão nova.
 
 ## 6. Verificar
 
-- **Temporal UI** (`localhost:8080`): workflow `agent-poc-...` aparece com histórico completo — cada Activity (`call_claude`, `execute_tool`) com input/output/retries.
-- **Langfuse UI** (`localhost:3000`, projeto `agent-poc`): trace com cada generation (`agent-turn`, modelo, tokens) e cada tool call (`get_weather`/`calculate`), tempo e custo.
+- **Temporal UI** (`localhost:8080`): o workflow fica `Running` com o `workflow_id` = `session_id` — cada pergunta aparece como um novo Update no histórico, com as Activities (`call_claude`, `execute_tool`) por baixo.
+- **Langfuse UI** (`localhost:3000`, projeto `agent-poc`) → **Sessions**: todas as perguntas da mesma sessão agrupadas, cada uma com generation (modelo, tokens) e tool calls.
 
 ## Comandos úteis
 
@@ -125,8 +135,9 @@ cd infra/langfuse && docker compose logs -f langfuse-web
 
 ## Pontos de atenção
 
-- `thinking` desabilitado nas chamadas ao Claude (`thinking={"type": "disabled"}`) — simplifica o round-trip pelo Temporal (sem blocos de thinking pra serializar). Pra habilitar, ver `shared/model-migration.md` do skill `claude-api` — Opus 5 pensa por padrão e isso soma no `max_tokens`.
-- Modelo fixo em `claude-haiku-4-5` (`agent/activities.py`) — trocar ali se quiser mais qualidade (`claude-opus-5`) ou meio-termo (`claude-sonnet-5`).
+- `thinking` desabilitado nas chamadas ao Claude (`thinking={"type": "disabled"}`) — simplifica o round-trip pelo Temporal (sem blocos de thinking pra serializar).
+- Modelo fixo em `claude-haiku-4-5` (`agent/activities.py`, constante `MODEL`) — trocar ali se quiser mais qualidade (`claude-opus-5`) ou ficar no meio-termo (`claude-sonnet-5`).
+- **Sessão nunca morre sozinha.** Workflow fica `Running` esperando a próxima pergunta indefinidamente (ou até `continue_as_new` depois de `MAX_TURNS_PER_RUN=20` perguntas, que só reseta o event history — a sessão continua). Pra encerrar de verdade: `docker exec temporal-admin-tools temporal workflow terminate --workflow-id <session_id> --address temporal:7233`. Sessões de teste acumulam workflows `Running` à toa — vale limpar de vez em quando.
 - Portas: Temporal Postgres em `5433` (não `5432`) pra não colidir com o Postgres do Langfuse.
 - `infra/langfuse/.env` e `agent/.env` têm segredos — já no `.gitignore`, nunca commitar.
 - `LANGFUSE_INIT_ORG_ID` precisa estar setado pro bootstrap automático rodar (sem ele, o Langfuse ignora todas as outras variáveis `LANGFUSE_INIT_*` silenciosamente, só avisa no log).

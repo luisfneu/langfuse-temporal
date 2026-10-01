@@ -1,4 +1,4 @@
-"""Interface web mínima pra conversar com o agent. Um workflow novo por pergunta."""
+"""Interface web pra conversar com o agent. 1 sessão (do browser) = 1 workflow long-running."""
 
 import asyncio
 import uuid
@@ -8,9 +8,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from flask import Flask, jsonify, render_template, request
-from temporalio.client import Client
+from temporalio.client import Client, WithStartWorkflowOperation
+from temporalio.common import WorkflowIDConflictPolicy
 
-from workflows import AgentRequest, AgentWorkflow
+from workflows import AgentWorkflow
 
 TASK_QUEUE = "agent-poc-task-queue"
 TEMPORAL_ADDRESS = "localhost:7233"
@@ -20,13 +21,18 @@ app = Flask(__name__)
 
 async def _ask(question: str, session_id: str) -> str:
     client = await Client.connect(TEMPORAL_ADDRESS)
-    handle = await client.start_workflow(
+
+    start_op = WithStartWorkflowOperation(
         AgentWorkflow.run,
-        AgentRequest(user_message=question, session_id=session_id),
-        id=f"agent-poc-web-{uuid.uuid4()}",
+        id=session_id,
         task_queue=TASK_QUEUE,
+        id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
     )
-    return await handle.result()
+    return await client.execute_update_with_start_workflow(
+        AgentWorkflow.ask,
+        question,
+        start_workflow_operation=start_op,
+    )
 
 
 @app.route("/")
