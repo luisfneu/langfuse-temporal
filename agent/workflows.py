@@ -7,6 +7,8 @@ history do Temporal de tempos em tempos, carregando o estado da sessão
 adiante (workflow_id não muda, só o run_id).
 """
 
+import asyncio
+import os
 from datetime import timedelta
 from typing import Any, Optional
 
@@ -25,6 +27,8 @@ with workflow.unsafe.imports_passed_through():
 
 MAX_TOOL_ITERATIONS = 8  # tool-use loop dentro de UMA pergunta
 MAX_TURNS_PER_RUN = 20  # perguntas antes de resetar o event history (continue_as_new)
+#  AGENT_SESSION_IDLE_SECONDS deixa curto só pra testar (ex: 8) sem esperar 30min de verdade
+SESSION_IDLE_TIMEOUT = timedelta(seconds=int(os.environ.get("AGENT_SESSION_IDLE_SECONDS", 1800)))
 RETRY_POLICY = RetryPolicy(maximum_attempts=3)
 
 
@@ -40,11 +44,24 @@ class AgentWorkflow:
         if initial_messages:
             self.messages = initial_messages
 
-        # fica vivo recebendo updates via `ask` até acumular turnos demais
-        await workflow.wait_condition(
-            lambda: self._ready_for_continue and workflow.all_handlers_finished()
-        )
-        workflow.continue_as_new(self.messages)
+        # fica vivo recebendo updates via `ask`. A cada pergunta o timeout de
+        # inatividade reseta (loop volta aqui); se não chegar pergunta nova
+        # dentro do prazo, cai no except e a sessão encerra (run termina
+        # normalmente = status Completed).
+        while True:
+            turns_before = self.turns_this_run
+            try:
+                await workflow.wait_condition(
+                    lambda: self._ready_for_continue
+                    or self.turns_this_run != turns_before,
+                    timeout=SESSION_IDLE_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                return
+
+            if self._ready_for_continue:
+                await workflow.wait_condition(workflow.all_handlers_finished)
+                workflow.continue_as_new(self.messages)
 
     @workflow.update
     async def ask(self, question: str) -> str:

@@ -115,7 +115,7 @@ Abre `http://localhost:8090`. Um `session_id` é gerado ao carregar a página (m
 
 ## 6. Verificar
 
-- **Temporal UI** (`localhost:8080`): o workflow fica `Running` com o `workflow_id` = `session_id` — cada pergunta aparece como um novo Update no histórico, com as Activities (`call_claude`, `execute_tool`) por baixo.
+- **Temporal UI** (`localhost:8080`): o workflow fica `Running` com o `workflow_id` = `session_id` — cada pergunta aparece como um novo Update no histórico, com as Activities (`call_claude`, `execute_tool`) por baixo. Sem pergunta nova por 30min (configurável, ver Pontos de atenção) o workflow fecha sozinho como `Completed`.
 - **Langfuse UI** (`localhost:3000`, projeto `agent-poc`) → **Sessions**: todas as perguntas da mesma sessão agrupadas, cada uma com generation (modelo, tokens) e tool calls.
 
 ## Comandos úteis
@@ -137,7 +137,9 @@ cd infra/langfuse && docker compose logs -f langfuse-web
 
 - `thinking` desabilitado nas chamadas ao Claude (`thinking={"type": "disabled"}`) — simplifica o round-trip pelo Temporal (sem blocos de thinking pra serializar).
 - Modelo fixo em `claude-haiku-4-5` (`agent/activities.py`, constante `MODEL`) — trocar ali se quiser mais qualidade (`claude-opus-5`) ou ficar no meio-termo (`claude-sonnet-5`).
-- **Sessão nunca morre sozinha.** Workflow fica `Running` esperando a próxima pergunta indefinidamente (ou até `continue_as_new` depois de `MAX_TURNS_PER_RUN=20` perguntas, que só reseta o event history — a sessão continua). Pra encerrar de verdade: `docker exec temporal-admin-tools temporal workflow terminate --workflow-id <session_id> --address temporal:7233`. Sessões de teste acumulam workflows `Running` à toa — vale limpar de vez em quando.
+- **Sessão expira sozinha por inatividade.** `SESSION_IDLE_TIMEOUT` em `agent/workflows.py` (default 30min, override via `AGENT_SESSION_IDLE_SECONDS` ao subir o worker). Sem pergunta nova dentro do prazo, o workflow fecha como `Completed` — pergunta nova depois disso é sessão zerada (perde o histórico). Enquanto ativa, continua viva normalmente; a cada `MAX_TURNS_PER_RUN=20` perguntas dá `continue_as_new` (só reseta o event history do Temporal, sessão continua, timeout de inatividade reseta a cada pergunta).
+  Pra encerrar uma sessão na mão antes do prazo: `docker exec temporal-admin-tools temporal workflow terminate --workflow-id <session_id> --address temporal:7233`.
+  **Cuidado ao mudar `SESSION_IDLE_TIMEOUT`/`MAX_TURNS_PER_RUN` com sessões já `Running`** — são constantes que viram parte do código determinístico do workflow; mudar o valor com histórico já gravado no formato antigo quebra o replay (erro de non-determinism). Termine as sessões abertas antes de reiniciar o worker com um valor novo.
 - Portas: Temporal Postgres em `5433` (não `5432`) pra não colidir com o Postgres do Langfuse.
 - `infra/langfuse/.env` e `agent/.env` têm segredos — já no `.gitignore`, nunca commitar.
 - `LANGFUSE_INIT_ORG_ID` precisa estar setado pro bootstrap automático rodar (sem ele, o Langfuse ignora todas as outras variáveis `LANGFUSE_INIT_*` silenciosamente, só avisa no log).
