@@ -11,7 +11,7 @@ from flask import Flask, jsonify, render_template, request
 from temporalio.client import Client, WithStartWorkflowOperation
 from temporalio.common import WorkflowIDConflictPolicy
 
-from workflows import AgentWorkflow
+from workflows import AgentWorkflow, AskRequest
 
 TASK_QUEUE = "agent-poc-task-queue"
 TEMPORAL_ADDRESS = "localhost:7233"
@@ -19,7 +19,7 @@ TEMPORAL_ADDRESS = "localhost:7233"
 app = Flask(__name__)
 
 
-async def _ask(question: str, session_id: str) -> str:
+async def _ask(question: str, session_id: str, user_id: str) -> str:
     client = await Client.connect(TEMPORAL_ADDRESS)
 
     start_op = WithStartWorkflowOperation(
@@ -30,7 +30,7 @@ async def _ask(question: str, session_id: str) -> str:
     )
     return await client.execute_update_with_start_workflow(
         AgentWorkflow.ask,
-        question,
+        AskRequest(question=question, user_id=user_id),
         start_workflow_operation=start_op,
     )
 
@@ -45,11 +45,12 @@ def ask():
     data = request.get_json(silent=True) or {}
     question = (data.get("question") or "").strip()
     session_id = (data.get("session_id") or "").strip() or f"web-{uuid.uuid4()}"
+    user_id = (data.get("user_id") or "").strip()
     if not question:
         return jsonify({"error": "pergunta vazia"}), 400
 
     try:
-        answer = asyncio.run(_ask(question, session_id))
+        answer = asyncio.run(_ask(question, session_id, user_id))
     except RuntimeError as exc:
         return jsonify({"error": f"não consegui falar com o Temporal: {exc}"}), 502
     except Exception as exc:  # erro vindo do workflow/activity (ex: Claude 401)

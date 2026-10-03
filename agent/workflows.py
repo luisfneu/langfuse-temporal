@@ -9,6 +9,7 @@ adiante (workflow_id não muda, só o run_id).
 
 import asyncio
 import os
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, Optional
 
@@ -32,17 +33,31 @@ SESSION_IDLE_TIMEOUT = timedelta(seconds=int(os.environ.get("AGENT_SESSION_IDLE_
 RETRY_POLICY = RetryPolicy(maximum_attempts=3)
 
 
+@dataclass
+class SessionState:
+    """Carregado adiante a cada continue_as_new — é toda a memória da sessão."""
+
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    user_id: str = ""
+
+
+@dataclass
+class AskRequest:
+    question: str
+    user_id: str = ""  # vazio = não muda o user_id já setado na sessão
+
+
 @workflow.defn
 class AgentWorkflow:
     def __init__(self) -> None:
-        self.messages: list[dict[str, Any]] = []
+        self.state = SessionState()
         self.turns_this_run = 0
         self._ready_for_continue = False
 
     @workflow.run
-    async def run(self, initial_messages: Optional[list[dict[str, Any]]] = None) -> None:
-        if initial_messages:
-            self.messages = initial_messages
+    async def run(self, initial_state: Optional[SessionState] = None) -> None:
+        if initial_state:
+            self.state = initial_state
 
         # fica vivo recebendo updates via `ask`. A cada pergunta o timeout de
         # inatividade reseta (loop volta aqui); se não chegar pergunta nova
@@ -61,12 +76,15 @@ class AgentWorkflow:
 
             if self._ready_for_continue:
                 await workflow.wait_condition(workflow.all_handlers_finished)
-                workflow.continue_as_new(self.messages)
+                workflow.continue_as_new(self.state)
 
     @workflow.update
-    async def ask(self, question: str) -> str:
+    async def ask(self, request: AskRequest) -> str:
         """Chamada pelo cliente (trigger.py/web.py) via execute_update_with_start_workflow."""
-        self.messages.append({"role": "user", "content": question})
+        if request.user_id:
+            self.state.user_id = request.user_id
+
+        self.state.messages.append({"role": "user", "content": request.question})
         answer = await self._run_tool_loop()
 
         self.turns_this_run += 1
@@ -78,16 +96,21 @@ class AgentWorkflow:
     async def _run_tool_loop(self) -> str:
         # workflow_id = session_id (ver client: id_conflict_policy=USE_EXISTING)
         session_id = workflow.info().workflow_id
+        user_id = self.state.user_id or None
 
         for _ in range(MAX_TOOL_ITERATIONS):
             turn = await workflow.execute_activity(
                 call_claude,
-                ClaudeTurnInput(messages=self.messages, session_id=session_id),
+                ClaudeTurnInput(
+                    messages=self.state.messages,
+                    session_id=session_id,
+                    user_id=user_id,
+                ),
                 start_to_close_timeout=timedelta(seconds=60),
                 retry_policy=RETRY_POLICY,
             )
 
-            self.messages.append({"role": "assistant", "content": turn.content})
+            self.state.messages.append({"role": "assistant", "content": turn.content})
 
             if turn.stop_reason != "tool_use":
                 return "".join(
@@ -105,6 +128,7 @@ class AgentWorkflow:
                         tool_input=block["input"],
                         tool_use_id=block["id"],
                         session_id=session_id,
+                        user_id=user_id,
                     ),
                     start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=RETRY_POLICY,
@@ -117,6 +141,6 @@ class AgentWorkflow:
                     }
                 )
 
-            self.messages.append({"role": "user", "content": tool_results})
+            self.state.messages.append({"role": "user", "content": tool_results})
 
         return "Limite de iterações atingido sem resposta final."

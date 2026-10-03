@@ -103,6 +103,8 @@ export AGENT_SESSION_ID=cli-xxxx   # o trigger.py imprime esse valor no final de
 ./.venv/bin/python trigger.py "e meu nome, lembra?"
 ```
 
+Opcional, `export AGENT_USER_ID=seu-nome` pra marcar quem é o dono da sessão (vira `userId` no Langfuse, ver passo 6).
+
 ## 5. Interface web (opcional)
 
 Chat com memória de conversa, sem usar a CLI. Precisa do worker rodando (passo 4).
@@ -113,10 +115,14 @@ cd agent && ./.venv/bin/python web.py
 
 Abre `http://localhost:8090`. Um `session_id` é gerado ao carregar a página (mostrado no canto do header) e reaproveitado em toda pergunta daquela aba — o agent lembra o que foi dito antes, dentro da mesma aba. Recarregar a página começa sessão nova.
 
+Campo **usuário** no topo: o que for digitado ali vira `user_id` nas traces (persiste no `localStorage` do navegador — sobrevive a reload, é o que deixa o Langfuse juntar várias sessões como sendo da mesma pessoa).
+
 ## 6. Verificar
 
 - **Temporal UI** (`localhost:8080`): o workflow fica `Running` com o `workflow_id` = `session_id` — cada pergunta aparece como um novo Update no histórico, com as Activities (`call_claude`, `execute_tool`) por baixo. Sem pergunta nova por 30min (configurável, ver Pontos de atenção) o workflow fecha sozinho como `Completed`.
-- **Langfuse UI** (`localhost:3000`, projeto `agent-poc`) → **Sessions**: todas as perguntas da mesma sessão agrupadas, cada uma com generation (modelo, tokens) e tool calls.
+- **Langfuse UI** (`localhost:3000`, projeto `agent-poc`):
+  - **Sessions** → todas as perguntas da mesma sessão agrupadas, cada uma com generation (modelo, tokens) e tool calls
+  - **Users** → se preencheu `user_id`, aparece aqui, com todas as sessões daquele usuário (é a tela de "You aren't tracking users yet" — some depois do primeiro `user_id` chegar)
 
 ## Comandos úteis
 

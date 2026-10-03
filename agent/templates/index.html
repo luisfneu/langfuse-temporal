@@ -52,6 +52,21 @@
     font-size: 0.75rem;
     color: var(--text-muted);
   }
+  .userbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--text-muted);
+  }
+  .userbar input {
+    flex: none;
+    width: 240px;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.82rem;
+  }
   #log {
     flex: 1;
     overflow-y: auto;
@@ -127,6 +142,11 @@
     <span id="session-badge" style="margin-left: auto;"></span>
   </header>
 
+  <div class="userbar">
+    <label for="user-id">usuário</label>
+    <input id="user-id" type="text" placeholder="seu nome ou e-mail (opcional)" autocomplete="off">
+  </div>
+
   <div id="log"></div>
 
   <form id="form">
@@ -139,10 +159,19 @@
     const form = document.getElementById("form");
     const input = document.getElementById("question");
     const button = document.getElementById("send");
+    const userInput = document.getElementById("user-id");
 
     // uma session por carregamento de página — agrupa as perguntas no Langfuse
     const sessionId = "web-" + crypto.randomUUID();
     document.getElementById("session-badge").textContent = "session: " + sessionId;
+
+    // user_id persiste entre reloads (localStorage) — é o que permite o
+    // Langfuse correlacionar várias sessões como sendo da mesma pessoa
+    const USER_STORAGE_KEY = "agent-poc-user-id";
+    userInput.value = localStorage.getItem(USER_STORAGE_KEY) || "";
+    userInput.addEventListener("input", () => {
+      localStorage.setItem(USER_STORAGE_KEY, userInput.value.trim());
+    });
 
     function addMessage(text, cls) {
       const el = document.createElement("div");
@@ -168,7 +197,11 @@
         const resp = await fetch("/ask", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question, session_id: sessionId }),
+          body: JSON.stringify({
+            question,
+            session_id: sessionId,
+            user_id: userInput.value.trim(),
+          }),
         });
         const data = await resp.json();
         pending.remove();

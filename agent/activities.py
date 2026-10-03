@@ -1,7 +1,7 @@
 """Activities Temporal: toda chamada de rede (Claude, tools) mora aqui, nunca no workflow."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 import anthropic
 from langfuse import get_client, propagate_attributes
@@ -25,6 +25,7 @@ langfuse = get_client()
 class ClaudeTurnInput:
     messages: list[dict[str, Any]]
     session_id: str
+    user_id: Optional[str] = None
 
 
 @dataclass
@@ -41,6 +42,7 @@ class ToolCallInput:
     tool_input: dict[str, Any]
     tool_use_id: str
     session_id: str
+    user_id: Optional[str] = None
 
 
 @dataclass
@@ -51,7 +53,7 @@ class ToolCallOutput:
 
 @activity.defn
 async def call_claude(data: ClaudeTurnInput) -> ClaudeTurnOutput:
-    with propagate_attributes(session_id=data.session_id):
+    with propagate_attributes(session_id=data.session_id, user_id=data.user_id):
         with langfuse.start_as_current_observation(
             as_type="generation",
             name="agent-turn",
@@ -101,7 +103,7 @@ async def call_claude(data: ClaudeTurnInput) -> ClaudeTurnOutput:
 
 @activity.defn
 async def execute_tool(data: ToolCallInput) -> ToolCallOutput:
-    with propagate_attributes(session_id=data.session_id):
+    with propagate_attributes(session_id=data.session_id, user_id=data.user_id):
         with langfuse.start_as_current_observation(
             as_type="tool",
             name=data.name,

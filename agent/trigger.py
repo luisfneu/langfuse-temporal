@@ -10,7 +10,7 @@ load_dotenv()  # silencia warning do langfuse ao importar workflows->activities
 from temporalio.client import Client, WithStartWorkflowOperation
 from temporalio.common import WorkflowIDConflictPolicy
 
-from workflows import AgentWorkflow
+from workflows import AgentWorkflow, AskRequest
 
 TASK_QUEUE = "agent-poc-task-queue"
 DEFAULT_QUESTION = "Qual o clima em Lisboa e quanto é (12 + 8) * 3?"
@@ -22,6 +22,7 @@ async def main() -> None:
     # exporta AGENT_SESSION_ID pra continuar uma sessão já existente
     # (ex: export AGENT_SESSION_ID=cli-xxxx) — sem isso, cria sessão nova.
     session_id = os.environ.get("AGENT_SESSION_ID") or f"cli-{uuid.uuid4()}"
+    user_id = os.environ.get("AGENT_USER_ID", "")
 
     client = await Client.connect("localhost:7233")
 
@@ -33,7 +34,7 @@ async def main() -> None:
     )
     answer = await client.execute_update_with_start_workflow(
         AgentWorkflow.ask,
-        question,
+        AskRequest(question=question, user_id=user_id),
         start_workflow_operation=start_op,
     )
 
