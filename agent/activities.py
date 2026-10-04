@@ -16,9 +16,32 @@ SYSTEM_PROMPT = (
     "português, de forma direta e curta."
 )
 
+# preço por 1M tokens (USD) — tabela cacheada do skill claude-api.
+# Langfuse não reconhece modelo Claude automaticamente num self-host v4 novo,
+# então calcula-se o custo aqui e manda explícito (cost_details sempre
+# sobrepõe o catálogo de preço do Langfuse, se um dia existir).
+PRICING_PER_MTOK = {
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
+    "claude-sonnet-5": {"input": 3.00, "output": 15.00},
+    "claude-opus-5": {"input": 5.00, "output": 25.00},
+}
+
 # lidos em import-time — worker.py chama load_dotenv() antes deste import
 claude = anthropic.Anthropic()
 langfuse = get_client()
+
+
+def _cost_details(input_tokens: int, output_tokens: int) -> dict[str, float]:
+    price = PRICING_PER_MTOK.get(MODEL)
+    if not price:
+        return {}
+    input_cost = input_tokens / 1_000_000 * price["input"]
+    output_cost = output_tokens / 1_000_000 * price["output"]
+    return {
+        "input": input_cost,
+        "output": output_cost,
+        "total": input_cost + output_cost,
+    }
 
 
 @dataclass
@@ -89,6 +112,9 @@ async def call_claude(data: ClaudeTurnInput) -> ClaudeTurnOutput:
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens,
                 },
+                cost_details=_cost_details(
+                    response.usage.input_tokens, response.usage.output_tokens
+                ),
             )
 
     langfuse.flush()
