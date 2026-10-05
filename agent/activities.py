@@ -26,9 +26,22 @@ PRICING_PER_MTOK = {
     "claude-opus-5": {"input": 5.00, "output": 25.00},
 }
 
+MAX_CALCULATE_EXPR_LENGTH = 200  # guardrail: evita expressão gigante travando o avaliador
+
 # lidos em import-time — worker.py chama load_dotenv() antes deste import
 claude = anthropic.Anthropic()
 langfuse = get_client()
+
+
+def _calculate_guardrail_violation(tool_input: dict[str, Any]) -> Optional[str]:
+    """None = passou. String = motivo do bloqueio."""
+    expr = tool_input.get("expression", "")
+    if len(expr) > MAX_CALCULATE_EXPR_LENGTH:
+        return (
+            f"expressão com {len(expr)} caracteres excede o limite de "
+            f"{MAX_CALCULATE_EXPR_LENGTH}"
+        )
+    return None
 
 
 def _cost_details(input_tokens: int, output_tokens: int) -> dict[str, float]:
@@ -130,6 +143,25 @@ async def call_claude(data: ClaudeTurnInput) -> ClaudeTurnOutput:
 @activity.defn
 async def execute_tool(data: ToolCallInput) -> ToolCallOutput:
     with propagate_attributes(session_id=data.session_id, user_id=data.user_id):
+        if data.name == "calculate":
+            violation = _calculate_guardrail_violation(data.tool_input)
+            if violation:
+                with langfuse.start_as_current_observation(
+                    as_type="guardrail",
+                    name="calculate-expr-limit",
+                    input=data.tool_input,
+                ) as guardrail:
+                    guardrail.update(
+                        output=f"bloqueado: {violation}",
+                        level="WARNING",
+                        status_message=violation,
+                    )
+                langfuse.flush()
+                return ToolCallOutput(
+                    tool_use_id=data.tool_use_id,
+                    content=f"Bloqueado pelo guardrail: {violation}",
+                )
+
         with langfuse.start_as_current_observation(
             as_type="tool",
             name=data.name,
