@@ -61,6 +61,7 @@ def _cost_details(input_tokens: int, output_tokens: int) -> dict[str, float]:
 class ClaudeTurnInput:
     messages: list[dict[str, Any]]
     session_id: str
+    trace_seed: str
     user_id: Optional[str] = None
 
 
@@ -78,6 +79,7 @@ class ToolCallInput:
     tool_input: dict[str, Any]
     tool_use_id: str
     session_id: str
+    trace_seed: str
     user_id: Optional[str] = None
 
 
@@ -89,12 +91,18 @@ class ToolCallOutput:
 
 @activity.defn
 async def call_claude(data: ClaudeTurnInput) -> ClaudeTurnOutput:
+    # mesma seed (vinda do workflow) => mesmo trace_id sempre — é isso que
+    # junta call_claude + execute_tool do MESMO turno numa árvore só, em vez
+    # de cada activity virar uma trace raiz separada.
+    trace_id = langfuse.create_trace_id(seed=data.trace_seed)
+
     with propagate_attributes(session_id=data.session_id, user_id=data.user_id):
         with langfuse.start_as_current_observation(
             as_type="generation",
             name="agent-turn",
             model=MODEL,
             input=data.messages,
+            trace_context={"trace_id": trace_id},
         ) as generation:
             response = claude.messages.create(
                 model=MODEL,
@@ -142,6 +150,8 @@ async def call_claude(data: ClaudeTurnInput) -> ClaudeTurnOutput:
 
 @activity.defn
 async def execute_tool(data: ToolCallInput) -> ToolCallOutput:
+    trace_id = langfuse.create_trace_id(seed=data.trace_seed)
+
     with propagate_attributes(session_id=data.session_id, user_id=data.user_id):
         if data.name == "calculate":
             violation = _calculate_guardrail_violation(data.tool_input)
@@ -150,6 +160,7 @@ async def execute_tool(data: ToolCallInput) -> ToolCallOutput:
                     as_type="guardrail",
                     name="calculate-expr-limit",
                     input=data.tool_input,
+                    trace_context={"trace_id": trace_id},
                 ) as guardrail:
                     guardrail.update(
                         output=f"bloqueado: {violation}",
@@ -166,6 +177,7 @@ async def execute_tool(data: ToolCallInput) -> ToolCallOutput:
             as_type="tool",
             name=data.name,
             input=data.tool_input,
+            trace_context={"trace_id": trace_id},
         ) as span:
             result = execute_tool_call(data.name, data.tool_input)
             span.update(output=result)

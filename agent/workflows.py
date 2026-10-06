@@ -98,6 +98,11 @@ class AgentWorkflow:
         session_id = workflow.info().workflow_id
         user_id = self.state.user_id or None
 
+        # mesma seed pra toda activity desse turno -> activities.py deriva o
+        # MESMO trace_id (langfuse.create_trace_id(seed=...) é determinístico)
+        # e todas caem na mesma árvore no Langfuse, em vez de traces soltas.
+        trace_seed = f"{session_id}:turn-{self.turns_this_run + 1}"
+
         for _ in range(MAX_TOOL_ITERATIONS):
             turn = await workflow.execute_activity(
                 call_claude,
@@ -105,6 +110,7 @@ class AgentWorkflow:
                     messages=self.state.messages,
                     session_id=session_id,
                     user_id=user_id,
+                    trace_seed=trace_seed,
                 ),
                 start_to_close_timeout=timedelta(seconds=60),
                 retry_policy=RETRY_POLICY,
@@ -129,6 +135,7 @@ class AgentWorkflow:
                         tool_use_id=block["id"],
                         session_id=session_id,
                         user_id=user_id,
+                        trace_seed=trace_seed,
                     ),
                     start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=RETRY_POLICY,
