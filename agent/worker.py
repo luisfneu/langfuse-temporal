@@ -7,7 +7,7 @@ load_dotenv()  # precisa rodar antes de importar activities (lê ANTHROPIC_API_K
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from activities import call_claude, execute_tool
+from activities import call_claude, execute_tool, log_event, summarize_messages
 from workflows import AgentWorkflow
 
 TASK_QUEUE = "agent-poc-task-queue"
@@ -19,7 +19,7 @@ async def main() -> None:
         client,
         task_queue=TASK_QUEUE,
         workflows=[AgentWorkflow],
-        activities=[call_claude, execute_tool],
+        activities=[call_claude, execute_tool, summarize_messages, log_event],
     )
     print(f"worker escutando task queue '{TASK_QUEUE}' (ctrl+C pra parar)")
     await worker.run()

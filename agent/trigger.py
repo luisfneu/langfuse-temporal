@@ -32,7 +32,7 @@ async def main() -> None:
         task_queue=TASK_QUEUE,
         id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
     )
-    answer = await client.execute_update_with_start_workflow(
+    response = await client.execute_update_with_start_workflow(
         AgentWorkflow.ask,
         AskRequest(question=question, user_id=user_id),
         start_workflow_operation=start_op,
@@ -41,8 +41,9 @@ async def main() -> None:
     print(f"session: {session_id}")
     print(f"pergunta: {question}")
     print("\n--- resposta do agent ---")
-    print(answer)
-    print(f"\n(pra continuar essa sessão: export AGENT_SESSION_ID={session_id})")
+    print(response.answer)
+    print(f"\ncusto acumulado da sessão: ${response.total_cost_usd:.4f}")
+    print(f"(pra continuar essa sessão: export AGENT_SESSION_ID={session_id})")
 
 
 if __name__ == "__main__":

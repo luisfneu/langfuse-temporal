@@ -1,0 +1,12 @@
+{
+  "blocked_weather_locations": [
+    "coreia do norte",
+    "coreia-do-norte",
+    "north korea",
+    "dprk",
+    "pyongyang",
+    "piongue"
+  ],
+  "max_calculate_expr_length": 200,
+  "max_session_cost_usd": 0.50
+}
