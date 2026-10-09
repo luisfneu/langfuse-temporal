@@ -52,6 +52,11 @@
     font-size: 0.75rem;
     color: var(--text-muted);
   }
+  header #new-session {
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
   .userbar {
     display: flex;
     align-items: center;
@@ -139,7 +144,9 @@
   <header>
     <h1>agent-poc</h1>
     <span>claude-haiku-4-5 · temporal · langfuse</span>
-    <span id="session-badge" style="margin-left: auto;"></span>
+    <span id="cost-badge" style="margin-left: auto;"></span>
+    <span id="session-badge"></span>
+    <button id="new-session" type="button">nova sessão</button>
   </header>
 
   <div class="userbar">
@@ -160,10 +167,42 @@
     const input = document.getElementById("question");
     const button = document.getElementById("send");
     const userInput = document.getElementById("user-id");
+    const sessionBadge = document.getElementById("session-badge");
+    const costBadge = document.getElementById("cost-badge");
+    const newSessionButton = document.getElementById("new-session");
 
-    // uma session por carregamento de página — agrupa as perguntas no Langfuse
-    const sessionId = "web-" + crypto.randomUUID();
-    document.getElementById("session-badge").textContent = "session: " + sessionId;
+    // uma session por carregamento de página (ou clique em "nova sessão") —
+    // agrupa as perguntas no Langfuse e dá memória de conversa só dentro dela
+    let sessionId;
+
+    async function closeCurrentSession() {
+      if (!sessionId) return;
+      try {
+        await fetch("/close", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+      } catch (err) {
+        // melhor esforço — se a rede falhar aqui, a sessão velha só fecha
+        // sozinha pelo idle timeout do Temporal
+      }
+    }
+
+    async function startNewSession() {
+      newSessionButton.disabled = true;
+      await closeCurrentSession();
+      sessionId = "web-" + crypto.randomUUID();
+      sessionBadge.textContent = "session: " + sessionId;
+      costBadge.textContent = "";
+      log.innerHTML = "";
+      input.value = "";
+      newSessionButton.disabled = false;
+      input.focus();
+    }
+
+    newSessionButton.addEventListener("click", startNewSession);
+    startNewSession();
 
     // user_id persiste entre reloads (localStorage) — é o que permite o
     // Langfuse correlacionar várias sessões como sendo da mesma pessoa
@@ -209,6 +248,9 @@
           addMessage(data.error || "erro desconhecido", "error");
         } else {
           addMessage(data.answer, "agent");
+          if (typeof data.total_cost_usd === "number") {
+            costBadge.textContent = "custo da sessão: $" + data.total_cost_usd.toFixed(4);
+          }
         }
       } catch (err) {
         pending.remove();
